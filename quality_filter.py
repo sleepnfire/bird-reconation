@@ -1106,6 +1106,105 @@ class ThresholdOptimizer:
         return results[0]
 
 
+def _run_grid_review(samples: list[dict], ground_truth: GroundTruth, page_size: int = 12):
+    import matplotlib.pyplot as plt
+
+    labels_state = {}
+    total_pages = (len(samples) + page_size - 1) // page_size
+
+    for page_idx in range(total_pages):
+        page_start = page_idx * page_size
+        page_end = min(page_start + page_size, len(samples))
+        page_samples = samples[page_start:page_end]
+
+        n = len(page_samples)
+        cols = 4
+        rows = (n + cols - 1) // cols
+
+        fig, axes = plt.subplots(rows, cols, figsize=(16, 4 * rows))
+        if rows == 1:
+            axes = [axes] if cols == 1 else [axes]
+        axes_flat = [ax for row in axes for ax in (row if hasattr(row, '__len__') else [row])]
+
+        for idx, sample in enumerate(page_samples):
+            ax = axes_flat[idx]
+            try:
+                img = Image.open(sample["path"])
+                ax.imshow(img)
+            except (OSError, UnidentifiedImageError):
+                ax.text(0.5, 0.5, "ERREUR", ha="center", va="center", transform=ax.transAxes)
+
+            source_tag = "KEPT" if sample["source"] == "europe" else "REJ"
+            ax.set_title(
+                f"{sample['species']}\n{source_tag} | score={sample['composite_score']:.2f}",
+                fontsize=9,
+            )
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+            key = sample["path"]
+            labels_state[key] = labels_state.get(key, "good")
+            color = "green" if labels_state[key] == "good" else "red"
+            for spine in ax.spines.values():
+                spine.set_color(color)
+                spine.set_linewidth(3)
+
+        for idx in range(n, len(axes_flat)):
+            axes_flat[idx].set_visible(False)
+
+        def make_on_click(page_s, ax_flat, fig_ref):
+            def on_click(event):
+                for i, ax in enumerate(ax_flat[:len(page_s)]):
+                    if ax == event.inaxes:
+                        key = page_s[i]["path"]
+                        labels_state[key] = "bad" if labels_state.get(key) == "good" else "good"
+                        color = "green" if labels_state[key] == "good" else "red"
+                        for spine in ax.spines.values():
+                            spine.set_color(color)
+                            spine.set_linewidth(3)
+                        fig_ref.canvas.draw()
+                        break
+            return on_click
+
+        def make_on_key(page_s, ax_flat, fig_ref):
+            def on_key(event):
+                if event.key == "g":
+                    for i, s in enumerate(page_s):
+                        labels_state[s["path"]] = "good"
+                        for spine in ax_flat[i].spines.values():
+                            spine.set_color("green")
+                            spine.set_linewidth(3)
+                    fig_ref.canvas.draw()
+                elif event.key == "b":
+                    for i, s in enumerate(page_s):
+                        labels_state[s["path"]] = "bad"
+                        for spine in ax_flat[i].spines.values():
+                            spine.set_color("red")
+                            spine.set_linewidth(3)
+                    fig_ref.canvas.draw()
+                elif event.key in ("enter", "n", "q"):
+                    plt.close(fig_ref)
+            return on_key
+
+        fig.canvas.mpl_connect("button_press_event", make_on_click(page_samples, axes_flat, fig))
+        fig.canvas.mpl_connect("key_press_event", make_on_key(page_samples, axes_flat, fig))
+
+        fig.suptitle(
+            f"Page {page_idx + 1}/{total_pages} | "
+            f"Clic: toggle good/bad | g: tout good | b: tout bad | n/Enter: suivant | q: quitter",
+            fontsize=11,
+        )
+        plt.tight_layout()
+        plt.show()
+
+        for s in page_samples:
+            key = s["path"]
+            label = labels_state.get(key, "good")
+            ground_truth.add_label(key, label, s["source"], s["species"])
+
+        print(f"  Page {page_idx + 1}: {len(page_samples)} images labellées")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Filtrage qualité des images via CLIP")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1138,12 +1237,29 @@ def main():
     ap.add_argument("--min-bbox-pct", type=float, default=5.0, help="Bbox minimale en %% de l'image (défaut: 5)")
     ap.add_argument("--rejected-dir", default=str(DATASET_DIR.parent / "europe_rejected"),
                     help="Dossier de destination pour les images rejetées")
+    ap.add_argument("--max-per-species", type=int, default=0,
+                    help="Nombre max d'images par espèce (0 = pas de limite, défaut: 0)")
 
     # --- mislabel ---
     mp = subparsers.add_parser("mislabel", help="Détecter les images potentiellement mal étiquetées")
     mp.add_argument("--split", default="train", choices=["train", "validation", "test"])
     mp.add_argument("--all", action="store_true", help="Analyser les 3 splits")
     mp.add_argument("--margin", type=float, default=0.1, help="Marge de détection (défaut: 0.1)")
+
+    # --- review ---
+    rv = subparsers.add_parser("review", help="Revue interactive en grille (matplotlib)")
+    rv.add_argument("--split", default="train", choices=["train", "validation", "test"])
+    rv.add_argument("--mode", default="borderline",
+                    choices=["random", "borderline", "worst_kept", "best_rejected"])
+    rv.add_argument("--n", type=int, default=5, help="Nombre d'images par espèce (défaut: 5)")
+    rv.add_argument("--page-size", type=int, default=12, help="Images par page (défaut: 12)")
+    rv.add_argument("--resume", action="store_true", help="Reprendre sans les images déjà labellées")
+
+    # --- metrics ---
+    subparsers.add_parser("metrics", help="Métriques precision/recall du filtre actuel")
+
+    # --- optimize ---
+    subparsers.add_parser("optimize", help="Optimiser les seuils de composite_score")
 
     args = parser.parse_args()
 
@@ -1176,6 +1292,7 @@ def main():
                 mislabel_margin=args.mislabel_margin,
                 min_bbox_pct=args.min_bbox_pct,
                 rejected_root=args.rejected_dir,
+                max_per_species=args.max_per_species,
             )
         else:
             split_dir = DATASET_DIR / args.split
@@ -1190,6 +1307,7 @@ def main():
                 dataset_root=str(DATASET_DIR),
                 min_bbox_pct=args.min_bbox_pct,
                 rejected_dir=rej_dir,
+                max_per_species=args.max_per_species,
             )
         print(f"\nRésultat: {stats['removed']} déplacées, {stats['kept']} conservées")
 
@@ -1214,6 +1332,46 @@ def main():
                         print(f"    {name}: own={info['own_distance']:.4f}, "
                               f"nearest={info['nearest_species']} ({info['nearest_distance']:.4f})")
             print(f"  Total: {total_suspected} suspected mislabels")
+
+    elif args.command == "review":
+        gt = GroundTruth(CALIBRATION_DIR / "ground_truth.json")
+        sampler = StratifiedSampler(DATASET_DIR / args.split, REJECTED_DIR / args.split)
+        samples = sampler.sample(n_per_species=args.n, mode=args.mode)
+
+        if args.resume:
+            existing = gt.load()
+            samples = [s for s in samples if s["path"] not in existing]
+
+        if not samples:
+            print("Aucune image à revoir.")
+            return
+
+        _run_grid_review(samples, gt, page_size=args.page_size)
+
+    elif args.command == "metrics":
+        gt = GroundTruth(CALIBRATION_DIR / "ground_truth.json")
+        labels = gt.load()
+        if not labels:
+            print("Aucun ground truth. Lancez 'review' d'abord.")
+            return
+        metrics = compute_metrics(labels)
+        print("\n=== MÉTRIQUES DU FILTRE ACTUEL ===")
+        for k, v in metrics.items():
+            print(f"  {k}: {v}")
+
+    elif args.command == "optimize":
+        gt = GroundTruth(CALIBRATION_DIR / "ground_truth.json")
+        optimizer = ThresholdOptimizer(DATASET_DIR / "train", REJECTED_DIR / "train")
+        best = optimizer.recommend(gt)
+        print("\n=== SEUIL OPTIMAL ===")
+        print(f"  Seuil: {best['thresholds']}")
+        print(f"  F1: {best['metrics']['f1']}")
+        results = optimizer.sweep(gt)
+        out_path = CALIBRATION_DIR / "optimization_results.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w") as f:
+            json.dump(results, f, indent=2)
+        print(f"  Détails → {out_path}")
 
 
 if __name__ == "__main__":

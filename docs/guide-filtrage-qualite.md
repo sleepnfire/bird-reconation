@@ -1,12 +1,12 @@
 # Guide : filtrage qualité des images
 
-Date : 2026-06-15
+Date : 2026-06-16
 
 ## Pourquoi filtrer
 
 Le dataset iNaturalist contient ~124 911 images pour 558 espèces d'oiseaux européens. Ces images proviennent de contributeurs amateurs et incluent inévitablement du bruit : spécimens morts, illustrations scannées, captures d'écran, photos floues, images sans oiseau, doublons visuels et erreurs d'étiquetage. Entraîner un modèle sur ces données brutes dégrade les performances et introduit des biais.
 
-Le pipeline de filtrage (`quality_filter.py`) nettoie le dataset en 6 étapes avant l'entraînement.
+Le pipeline de filtrage (`quality_filter.py`) nettoie le dataset en 8 étapes avant l'entraînement.
 
 ---
 
@@ -31,7 +31,7 @@ Images brutes (iNaturalist)
            ▼
 ┌──────────────────────────┐
 │ 3. Déduplication visuelle│  Similarité cosinus entre paires,
-│    (near-duplicates)     │  supprime les doublons (seuil 0.95)
+│    (near-duplicates)     │  garde la meilleure composite_score
 └──────────┬───────────────┘
            │
            ▼
@@ -48,12 +48,24 @@ Images brutes (iNaturalist)
            │
            ▼
 ┌──────────────────────────┐
-│ 6. apply_filter          │  Déplace les images rejetées,
+│ 6. Score qualité         │  composite_score par image :
+│    photographique        │  détection + bbox + netteté
+└──────────┬───────────────┘
+           │
+           ▼
+┌──────────────────────────┐
+│ 7. Sélection top-N       │  --max-per-species garde les N
+│    par espèce            │  meilleures images par composite_score
+└──────────┬───────────────┘
+           │
+           ▼
+┌──────────────────────────┐
+│ 8. apply_filter          │  Déplace les images rejetées,
 │                          │  MAJ annotations/label_map/metadata
 └──────────────────────────┘
 ```
 
-Les étapes 1 à 4 produisent des rapports (JSON + embeddings .pt). L'étape 6 consomme ces rapports pour effectuer le nettoyage réel. Cette séparation permet d'inspecter les rapports avant de supprimer quoi que ce soit.
+Les étapes 1 à 6 produisent des rapports (JSON + embeddings .pt). L'étape 8 consomme ces rapports pour effectuer le nettoyage réel. Cette séparation permet d'inspecter les rapports avant de supprimer quoi que ce soit.
 
 ---
 
@@ -123,7 +135,7 @@ La déduplication calcule la similarité cosinus entre toutes les paires d'image
 
 ### Résolution des doublons
 
-Pour chaque paire dupliquée, l'algorithme garde l'image avec le meilleur score CLIP `good` (celle qui a la meilleure qualité photographique estimée). En cas d'égalité, l'image dont le nom vient en premier alphabétiquement est gardée.
+Pour chaque paire dupliquée, l'algorithme garde l'image avec le meilleur `composite_score` (score qualité photographique combinant confiance de détection, taille de bbox et netteté). En cas d'égalité, l'image dont le nom vient en premier alphabétiquement est gardée.
 
 Quand plusieurs images forment un cluster de doublons (A≈B, B≈C), la résolution est gloutonne par similarité décroissante : les paires les plus similaires sont traitées en premier, et une image déjà marquée pour suppression n'entraîne pas de suppression supplémentaire.
 
@@ -182,7 +194,73 @@ Les annotations iNaturalist incluent des bounding boxes (détection automatique)
 
 ---
 
-## Étape 6 — Application du filtre (apply_filter)
+## Étape 6 — Score qualité photographique
+
+### Principe
+
+Chaque image reçoit un score composite évaluant sa qualité photographique, indépendamment de la classification CLIP. Ce score combine trois signaux issus des annotations de détection (Grounding DINO) et de l'image elle-même.
+
+### Composantes
+
+| Signal | Source | Ce qui est mesuré |
+|--------|--------|-------------------|
+| `detection_score` | annotations.json (`score`) | Confiance du détecteur d'oiseaux |
+| `bbox_pct` | annotations.json (`bbox`) + taille image | % de la surface image occupé par l'oiseau |
+| `sharpness` | Variance du Laplacien (cv2) sur le crop bbox | Netteté de l'image dans la zone de l'oiseau |
+
+### Formule
+
+```
+composite_score = 0.3 × norm_det + 0.4 × norm_bbox + 0.3 × norm_sharp
+```
+
+Avec normalisation :
+- `norm_det = min(detection_score, 1.0)` — déjà dans [0, 1]
+- `norm_bbox = min(bbox_pct / 30.0, 1.0)` — une bbox occupant 30% de l'image = score max
+- `norm_sharp = min(sharpness / 500.0, 1.0)` — une variance Laplacien de 500 = score max
+
+### Poids
+
+Les poids (0.3 / 0.4 / 0.3) favorisent la taille de la bbox : une image où l'oiseau est gros et bien cadré est plus utile pour l'entraînement qu'une image nette mais où l'oiseau est minuscule.
+
+### Cas particuliers
+
+- Pas d'annotation (`None`) → `composite_score = 0.0`
+- Image inexistante ou illisible → `composite_score = 0.0`
+- Bbox de taille 0 → sharpness = 0, mais detection_score peut être non nul
+
+### Fonctions
+
+- `score_image_quality(image_path, annotation)` — score une image individuelle
+- `score_species_quality(species_dir)` — score toutes les images d'un dossier espèce
+
+### Fondements académiques
+
+- Bai et al. (2024) — Multimodal Data Curation via Object Detection and Filter Ensembles
+- Zhou et al. (2025) — Autonomous Bird Feeder : confiance ≥ 0.7, bbox > 2%
+- Pech-Pacheco et al. (ICPR 2000) — variance du Laplacien comme mesure de netteté
+
+---
+
+## Étape 7 — Sélection top-N par espèce
+
+### Principe
+
+Quand le dataset contient un nombre variable d'images par espèce (ex. 50 pour la mésange bleue vs 500 pour le merle noir), le déséquilibre nuit à l'entraînement. L'option `--max-per-species N` limite chaque espèce aux N meilleures images classées par `composite_score` décroissant.
+
+### Fonctionnement
+
+1. Après application de tous les autres filtres (catégorie CLIP, outliers, duplicates, mislabels, bbox min), les images restantes sont triées par `composite_score`
+2. Si une espèce a plus de N images restantes, les images excédentaires (les moins bonnes) sont ajoutées à la liste des suppressions
+3. La sélection s'applique **après** les autres filtres : on ne garde pas une image de mauvaise catégorie même si elle a un bon score
+
+### Paramètre
+
+- `--max-per-species N` (défaut 0 = pas de limite) dans la commande `apply`
+
+---
+
+## Étape 8 — Application du filtre (apply_filter)
 
 ### Ce qui se passe
 
@@ -202,22 +280,32 @@ Les annotations iNaturalist incluent des bounding boxes (détection automatique)
 python quality_filter.py report --split train --workers 4 --duplicate-threshold 0.95
 
 # 2. Inspecter les rapports (optionnel)
-#    → reports/train/*.json contient les classifications, outliers et duplicates
+#    → reports/train/*.json contient les classifications, outliers, duplicates et quality scores
 #    → reports/train/*.pt contient les embeddings pour la détection de mislabels
 
 # 3. Détecter les mislabels (rapport console)
 python quality_filter.py mislabel --split train --margin 0.1
 
-# 4. Appliquer le filtre (déplacer les images rejetées)
+# 4. Revue interactive (optionnel — calibration des seuils)
+python quality_filter.py review --split train --mode borderline --n 5
+
+# 5. Consulter les métriques du filtre (après review)
+python quality_filter.py metrics
+
+# 6. Optimiser les seuils de composite_score (après review)
+python quality_filter.py optimize
+
+# 7. Appliquer le filtre (déplacer les images rejetées)
 python quality_filter.py apply --split train \
     --remove-outliers \
     --remove-duplicates \
     --remove-mislabeled \
-    --mislabel-margin 0.1
+    --mislabel-margin 0.1 \
+    --max-per-species 300
 
-# 5. Répéter pour validation et test
+# 8. Répéter pour validation et test
 python quality_filter.py report --all --workers 4 --duplicate-threshold 0.95
-python quality_filter.py apply --all --remove-outliers --remove-duplicates --remove-mislabeled
+python quality_filter.py apply --all --remove-outliers --remove-duplicates --remove-mislabeled --max-per-species 300
 ```
 
 ### Commandes détaillées
@@ -257,6 +345,7 @@ python quality_filter.py apply [options]
 | `--remove-mislabeled` | — | Retirer les images suspectées mal étiquetées |
 | `--mislabel-margin FLOAT` | 0.1 | Marge pour la détection de mislabels |
 | `--min-bbox-pct FLOAT` | 5.0 | Bbox minimale en % de l'image |
+| `--max-per-species N` | 0 | Nombre max d'images par espèce (0 = pas de limite) |
 | `--rejected-dir PATH` | `dataset/europe_rejected` | Dossier de destination |
 
 #### `mislabel` — Rapport de mislabels (consultation uniquement)
@@ -270,6 +359,42 @@ python quality_filter.py mislabel [options]
 | `--split` | `train` | Split à analyser |
 | `--all` | — | Analyser les 3 splits |
 | `--margin FLOAT` | 0.1 | Marge de détection |
+
+#### `review` — Revue interactive en grille
+
+```bash
+python quality_filter.py review [options]
+```
+
+Interface matplotlib pour labeller manuellement un échantillon d'images. Clic sur une image pour basculer good/bad, touche `g` pour tout marquer good, `b` pour tout marquer bad, `n`/`Enter` pour passer à la page suivante.
+
+| Option | Défaut | Description |
+|--------|--------|-------------|
+| `--split` | `train` | Split à réviser |
+| `--mode` | `borderline` | Mode d'échantillonnage (`random`, `borderline`, `worst_kept`, `best_rejected`) |
+| `--n N` | 5 | Nombre d'images par espèce |
+| `--page-size N` | 12 | Nombre d'images par page |
+| `--resume` | — | Reprendre sans les images déjà labellées |
+
+Les labels sont sauvegardés dans `calibration/ground_truth.json`.
+
+#### `metrics` — Métriques du filtre
+
+```bash
+python quality_filter.py metrics
+```
+
+Affiche precision, recall, F1, false positive rate et false negative rate du filtre actuel, calculés à partir du ground truth constitué via `review`. Nécessite d'avoir labellé des images au préalable.
+
+#### `optimize` — Optimisation des seuils
+
+```bash
+python quality_filter.py optimize
+```
+
+Balaye une grille de seuils `composite_score` (0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4) et évalue les métriques pour chaque seuil sur le ground truth. Recommande le seuil qui maximise le F1-score. Les résultats détaillés sont sauvegardés dans `calibration/optimization_results.json`.
+
+Fondement académique : Setting BirdNET confidence thresholds (Springer 2025) — méthodologie de balayage de seuils pour les détecteurs d'oiseaux.
 
 ---
 
@@ -300,6 +425,12 @@ python quality_filter.py mislabel [options]
         "screen_scan": 0.0987,
         "not_bird": 0.0156,
         "poor_quality": 0.0044
+      },
+      "quality": {
+        "detection_score": 0.92,
+        "bbox_pct": 18.5,
+        "sharpness": 245.3,
+        "composite_score": 0.6712
       }
     }
   },
@@ -321,15 +452,50 @@ python quality_filter.py mislabel [options]
 
 La clé `duplicates` n'est présente que si `--duplicate-threshold > 0` lors du `report`.
 
+La clé `quality` est ajoutée pour chaque image et contient le score composite. Les rapports existants sans clé `quality` restent lisibles — les fonctions traitent l'absence de cette clé via `.get("quality", {}).get("composite_score", 0.0)`.
+
 ### Embeddings (`.pt`)
 
 Fichier PyTorch (`reports/{split}/{espèce}.pt`) contenant un dict `{nom_image: tensor}` avec des vecteurs float32 de dimension 768 (sortie de ViT-L-14). Utilisés par la détection de mislabels.
+
+### Ground truth (`calibration/ground_truth.json`)
+
+```json
+{
+  "/chemin/vers/image.jpg": {
+    "label": "good",
+    "source": "europe",
+    "species": "parus_major"
+  }
+}
+```
+
+Constitué via la commande `review`, utilisé par `metrics` et `optimize`.
+
+---
+
+## Ce qui a été supprimé (migration depuis calibrate_datasets.py)
+
+L'ancien module `calibrate_datasets.py` a été entièrement fusionné dans `quality_filter.py`. Les éléments suivants ont été **supprimés** car ils sont remplacés par des fonctionnalités intégrées au pipeline unifié :
+
+| Élément supprimé | Remplacement |
+|-------------------|-------------|
+| `calibrate_datasets.py` | Fusionné dans `quality_filter.py` |
+| `tests/test_calibrate_datasets.py` | Tests migrés dans `tests/test_quality_filter.py` (UC-Q53→UC-Q73) |
+| `ImageScorer` (classe) | Fonctions standalone `score_image_quality()` / `score_species_quality()` |
+| `DatasetAuditor` | Rapport qualité unifié (commande `report` + clé `quality`) |
+| `consolidate()` | Relancer `report` + `apply` directement |
+| `select_top()` | `apply --max-per-species N` |
+| `apply_reclassification()` | `apply_filter()` avec les mêmes capacités |
+| Tests UC-C01→UC-C07 | Migrés en UC-Q53→UC-Q59 (score qualité) |
+| Tests UC-C08→UC-C21 | Migrés en UC-Q60→UC-Q73 (sampler, ground truth, metrics, optimizer) |
+| Tests UC-C22→UC-C34 | Supprimés (DatasetAuditor, consolidate, select_top, apply_reclassification) |
 
 ---
 
 ## Tests
 
-Le pipeline est couvert par 56 tests (`tests/test_quality_filter.py`) :
+Le pipeline est couvert par 82 tests (`tests/test_quality_filter.py`) :
 
 | Plage | Domaine |
 |-------|---------|
@@ -342,6 +508,13 @@ Le pipeline est couvert par 56 tests (`tests/test_quality_filter.py`) :
 | UC-Q29 à UC-Q35 | Batch processing, fp16, device |
 | UC-Q36 à UC-Q42 | Déduplication visuelle |
 | UC-Q43 à UC-Q52 | Vérification croisée des labels et intégration |
+| UC-Q53 à UC-Q59 | Score qualité photographique (composite_score) |
+| UC-Q60 à UC-Q63 | Échantillonnage stratifié (StratifiedSampler) |
+| UC-Q64 à UC-Q66 | Ground truth (persistance des labels humains) |
+| UC-Q67 à UC-Q70 | Métriques precision/recall/F1 |
+| UC-Q71 à UC-Q73 | Optimisation de seuils (ThresholdOptimizer) |
+| UC-Q74 à UC-Q76 | Sélection top-N par espèce (max_per_species) |
+| UC-Q77 à UC-Q78 | Intégration quality score dans rapports et déduplication |
 
 ```bash
 # Lancer tous les tests
@@ -350,6 +523,31 @@ pytest tests/test_quality_filter.py -v
 # Lancer uniquement les tests de déduplication
 pytest tests/test_quality_filter.py -k "UCQ36 or UCQ37 or UCQ38 or UCQ39 or UCQ40 or UCQ41 or UCQ42"
 
-# Lancer uniquement les tests de mislabel
-pytest tests/test_quality_filter.py -k "UCQ43 or UCQ44 or UCQ45 or UCQ46 or UCQ47 or UCQ48 or UCQ49"
+# Lancer uniquement les tests de calibration
+pytest tests/test_quality_filter.py -k "UCQ60 or UCQ61 or UCQ62 or UCQ63 or UCQ64 or UCQ65 or UCQ66 or UCQ67 or UCQ68 or UCQ69 or UCQ70 or UCQ71 or UCQ72 or UCQ73"
+```
+
+---
+
+## Vérification finale
+
+```bash
+# 82 tests verts
+pytest tests/test_quality_filter.py -v
+
+# CLI : commandes existantes
+python quality_filter.py report --help
+python quality_filter.py apply --help        # vérifie --max-per-species
+
+# CLI : nouvelles commandes
+python quality_filter.py review --help
+python quality_filter.py metrics --help
+python quality_filter.py optimize --help
+
+# Fichiers supprimés
+ls calibrate_datasets.py 2>&1               # No such file
+ls tests/test_calibrate_datasets.py 2>&1    # No such file
+
+# Backward-compat : rapports JSON existants (sans clé quality) restent lisibles
+# → les fonctions utilisent .get("quality", {}).get("composite_score", 0.0)
 ```
