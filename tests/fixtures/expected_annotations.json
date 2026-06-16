@@ -1,0 +1,354 @@
+{
+  "_comment": "Annotations manuelles de référence pour les tests. bird_count = nombre d oiseaux visibles. boxes = liste de [x, y, width, height] en pixels. tolerance = marge d erreur acceptée en pixels pour comparer avec l auto-annotation.",
+  "_tolerance": 40,
+  "branta_canadensis__482450582.jpg": {
+    "width": 500,
+    "height": 297,
+    "bird_count": 2,
+    "boxes": [
+      [
+        46,
+        81,
+        413,
+        170
+      ],
+      [
+        34,
+        198,
+        350,
+        96
+      ]
+    ]
+  },
+  "turdus_philomelos__481324561.jpeg": {
+    "width": 500,
+    "height": 375,
+    "bird_count": 1,
+    "boxes": [
+      [
+        210,
+        128,
+        100,
+        100
+      ]
+    ]
+  },
+  "turdus_merula__59179456.jpeg": {
+    "width": 500,
+    "height": 375,
+    "bird_count": 1,
+    "boxes": [
+      [
+        170,
+        95,
+        228,
+        119
+      ]
+    ]
+  },
+  "buteo_buteo__314944955.jpeg": {
+    "width": 346,
+    "height": 500,
+    "bird_count": 1,
+    "boxes": [
+      [
+        158,
+        267,
+        37,
+        75
+      ]
+    ]
+  },
+  "pyrrhula_pyrrhula__61634068.jpg": {
+    "width": 500,
+    "height": 389,
+    "bird_count": 1,
+    "boxes": [
+      [
+        265,
+        187,
+        85,
+        156
+      ]
+    ]
+  },
+  "passer_domesticus__296642255.jpg": {
+    "width": 500,
+    "height": 333,
+    "bird_count": 1,
+    "boxes": [
+      [
+        130,
+        148,
+        117,
+        102
+      ]
+    ]
+  },
+  "garrulus_glandarius__27998507.jpg": {
+    "width": 500,
+    "height": 375,
+    "bird_count": 1,
+    "boxes": [
+      [
+        110,
+        86,
+        294,
+        255
+      ]
+    ]
+  },
+  "falco_tinnunculus__520475608.jpg": {
+    "width": 500,
+    "height": 375,
+    "bird_count": 1,
+    "boxes": [
+      [
+        205,
+        110,
+        87,
+        122
+      ]
+    ]
+  },
+  "anas_platyrhynchos__463363669.jpeg": {
+    "width": 500,
+    "height": 281,
+    "bird_count": 2,
+    "boxes": [
+      [
+        160,
+        8,
+        248,
+        271
+      ],
+      [
+        302,
+        18,
+        197,
+        224
+      ]
+    ]
+  },
+  "ardea_alba__155569454.jpeg": {
+    "width": 500,
+    "height": 373,
+    "bird_count": 2,
+    "boxes": [
+      [
+        73,
+        50,
+        214,
+        286
+      ],
+      [
+        412,
+        94,
+        79,
+        112
+      ]
+    ]
+  },
+  "pica_pica__178107846.jpeg": {
+    "width": 500,
+    "height": 429,
+    "bird_count": 1,
+    "boxes": [
+      [
+        135,
+        100,
+        185,
+        176
+      ]
+    ]
+  },
+  "phylloscopus_collybita__567059565.jpg": {
+    "width": 500,
+    "height": 404,
+    "bird_count": 1,
+    "boxes": [
+      [
+        68,
+        121,
+        287,
+        169
+      ]
+    ]
+  },
+  "aythya_fuligula__238937702.jpg": {
+    "width": 400,
+    "height": 500,
+    "bird_count": 1,
+    "boxes": [
+      [
+        32,
+        178,
+        215,
+        99
+      ]
+    ]
+  },
+  "phoenicurus_ochruros__462879213.jpeg": {
+    "width": 500,
+    "height": 375,
+    "bird_count": 1,
+    "boxes": [
+      [
+        220,
+        85,
+        103,
+        109
+      ]
+    ]
+  },
+  "cygnus_olor__40180274.jpeg": {
+    "width": 500,
+    "height": 375,
+    "bird_count": 2,
+    "boxes": [
+      [
+        96,
+        141,
+        89,
+        64
+      ],
+      [
+        211,
+        129,
+        125,
+        79
+      ]
+    ]
+  },
+  "saxicola_rubicola__420491197.jpg": {
+    "width": 500,
+    "height": 327,
+    "bird_count": 1,
+    "boxes": [
+      [
+        249,
+        104,
+        96,
+        100
+      ]
+    ]
+  },
+  "vanellus_vanellus__487219361.jpeg": {
+    "width": 500,
+    "height": 375,
+    "bird_count": 1,
+    "boxes": [
+      [
+        97,
+        54,
+        381,
+        249
+      ]
+    ]
+  },
+  "sturnus_vulgaris__209618486.jpeg": {
+    "width": 500,
+    "height": 398,
+    "bird_count": 12,
+    "boxes": [
+      [
+        290,
+        143,
+        44,
+        46
+      ],
+      [
+        325,
+        170,
+        28,
+        55
+      ],
+      [
+        421,
+        174,
+        25,
+        49
+      ],
+      [
+        290,
+        183,
+        27,
+        38
+      ],
+      [
+        136,
+        171,
+        32,
+        39
+      ],
+      [
+        262,
+        178,
+        28,
+        33
+      ],
+      [
+        149,
+        212,
+        39,
+        23
+      ],
+      [
+        117,
+        200,
+        33,
+        25
+      ],
+      [
+        75,
+        176,
+        42,
+        35
+      ],
+      [
+        100,
+        209,
+        34,
+        43
+      ],
+      [
+        129,
+        298,
+        30,
+        40
+      ],
+      [
+        27,
+        300,
+        30,
+        45
+      ]
+    ]
+  },
+  "chloris_chloris__525082392.jpg": {
+    "width": 500,
+    "height": 500,
+    "bird_count": 1,
+    "boxes": [
+      [
+        176,
+        156,
+        159,
+        178
+      ]
+    ]
+  },
+  "ciconia_ciconia__460924247.jpeg": {
+    "width": 500,
+    "height": 371,
+    "bird_count": 1,
+    "boxes": [
+      [
+        196,
+        186,
+        84,
+        111
+      ]
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+pillow>=11.0,<13.0
+numpy>=2.0
+scikit-learn>=1.5
+matplotlib>=3.9,<3.10
+tqdm>=4.60
+timm>=1.0
+onnx>=1.15
+onnxruntime>=1.18
+model-compression-toolkit>=2.0

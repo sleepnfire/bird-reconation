@@ -1,0 +1,49 @@
+# === Environnements virtuels ===
+.venv/
+.venv-imx500/
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# === Datasets & images ===
+dataset/
+A-trier/
+samples/
+
+# === Données iNaturalist (volumineux) ===
+create-aws-dataset/iNaturalist.db
+create-aws-dataset/observations.csv
+create-aws-dataset/photos.csv
+create-aws-dataset/taxa.csv
+create-aws-dataset/RIOC.mwb.bak
+
+# === Poids de modèles IA ===
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.hef
+
+# === Résultats d'exécution ===
+output/
+calibration/
+reports/
+
+# === Claude Code ===
+.claude/
+
+# === Prompts IA ===
+prompts/
+
+# === IDE ===
+.idea/
+
+# === macOS ===
+.DS_Store
+
+# === Divers ===
+*.log
