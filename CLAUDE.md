@@ -21,6 +21,7 @@ Les modèles pour l'IMX500 doivent être quantifiés INT8 et convertis via l'IMX
 ```
 bird-detection/
 ├── main.py                    # Point d'entrée (test PyTorch)
+├── quality_filter.py          # Filtrage qualité CLIP + score composite + calibration
 ├── create-aws-dataset/        # Préparation du dataset à partir d'iNaturalist
 │   ├── iNaturalist.db         # Base SQLite (~177 Go) des observations iNaturalist
 │   ├── observations.csv       # Export CSV des observations (~27 Go)
@@ -33,6 +34,9 @@ bird-detection/
 │   ├── europe/                # Oiseaux d'Europe
 │   └── world/                 # Oiseaux du monde
 │       └── metadata.json      # Format : slug, nom scientifique, famille, noms FR/EN
+├── reports/                   # Rapports qualité JSON + embeddings .pt
+├── calibration/               # Ground truth et résultats d'optimisation
+├── docs/                      # Documentation (guide-filtrage-qualite.md)
 ├── A-trier/                   # Datasets bruts à trier (images, CSV)
 └── .venv/                     # Environnement virtuel Python
 ```
@@ -71,6 +75,16 @@ source .venv/bin/activate
 
 # Lancer le script principal
 python main.py
+
+# Filtrage qualité (pipeline complet dans quality_filter.py)
+python quality_filter.py report --all --workers 4 --duplicate-threshold 0.95
+python quality_filter.py apply --all --remove-outliers --remove-duplicates --remove-mislabeled
+python quality_filter.py review --split train --mode borderline
+python quality_filter.py metrics
+python quality_filter.py optimize
+
+# Tests
+pytest tests/test_quality_filter.py -v
 ```
 
 ## Conventions
